@@ -1,0 +1,1425 @@
+---
+title: "Falcon Airlines - Capstone Project - Notes III"
+author: "Mohanned Gomaa"
+date: "6/15/2020"
+output: pdf_document
+---
+
+Introduction:
+This is the dilemma of a reputed US airline carrier ‘Falcon airlines’. They aim to determine the relative importance of each parameter with regards to their contribution to passenger satisfaction. 
+In Project Notes III, we will be focusing on the model development for their solution w
+
+Setting a working directory 
+```{r}
+setwd('D:/UT Autin/Capstone/Project Notes III')
+getwd()
+```
+Load required libraries
+```{r}
+# Libraries required #
+library(readxl) #library to import excel files 
+library(psych) #load necessary library for PCA
+library(car) # use for multicollinearity test (i.e. Variance Inflation Factor(VIF))
+library(MASS) # use for basic statistics
+library(dummies) # use for dummy variable transformation(i.e. One-Hot Encoding)
+library(ggplot2) # use for visualization
+library(caret) # use for LM model training i.e Naive bayes (train() function )
+library(Information) # use for calculating WOE and Information value
+library(caTools)
+library(ROCR) # use for ROC curve 
+library(dplyr) # use for basic data wrangling
+library(tidyr) # Converting data shape- long to wide or wide to long format
+library(corrplot) # for correlation analysis 
+library(ggplot2) # for visualization 
+library(GGally) # for better visualization of multiple plots in one grid
+library(factoextra) # use for PCA technique
+library(e1071) # using for machine learning models(i.e.Naive Bayes,KNN Models)
+library(ggloop) #helps in visualization 
+library(ineq)# Calculate Gini coeff for ROC curve 
+library(InformationValue)#concordance ratio library 
+library(class)
+library(xgboost) #calling library for accelerated GBM, XGboost
+library(Matrix) #calling library for dummy coding used for XGboost
+library(randomForest)# calling library for random forest 
+library(factoextra) # use for PCA technique
+```
+
+Import load data sets 
+```{r}
+train.data= read_xlsx(path = 'Train.data.xlsx')
+test.data= read_xlsx(path = 'Test.data.xlsx')
+```
+
+Quick Overview of my data
+```{r}
+head(train.data)
+head(test.data)
+```
+
+Running a double check to confirm that my data split maintian the same ration between 
+0 and 1. 
+```{r}
+table(train.data$Target)
+34833/(34833+28809) #0.54% 
+table(test.data$Target)
+14928/(14928+12347)#0.54% 
+# Earlier in Project Submission Notes II we have confirmed that data is balanced at nearly a 50-50% split between Satisfied (i.e. 1) and Other (i.e. 0). After the split between test and train the ratio still holds.
+```
+
+
+In Notes II, we have presented our Analytical Approach. Mine first step was Data pre-processing, which was handled in Notes II. The Second step was dimension reduction, using PCA. This step was introduced to group all highly correlated variables that affects satisfaction, and give a better understand of what is really affecting passengers satisfaction.   
+
+Analytical Approach Step 2: PCA
+PCA will allow us to easily analyze large data sets, by combing highly correlated variables, under a principal components. Simply, think of it as combing similar topics under on subject domain. This will allow us to understand are the key areas that affects the passengers Satisfaction. In addition we will reduce our data size, allowing for a better performance for model.
+
+PCA Step 2.1: Create New Data Set Scaled to be used in our PCA
+```{r}
+## PCA(Principal Component Analysis)
+train.PCA.data <- data.frame(scale(train.data[,c(3,6:22)]))#scaling data to make sure no variables is affecting the PCA due to its unit of measure.
+test.PCA.data <- data.frame(scale(test.data[,c(3,6:22)]))#scaling data to make sure no variables is affecting the PCA due to its unit of measure.
+
+train.PCA.data$Target = train.data$Target
+test.PCA.data$Target = test.data$Target
+
+dim(train.PCA.data)#checking that my scaling did not affect row or variables count 
+dim(test.PCA.data)#checking that my scaling did not affect row or variables count 
+?prcomp
+train.PCA.data.Model = prcomp(train.PCA.data[,c(-19)], scale = FALSE) #exclude any non-numeric variable to run the PCA, namely Target
+test.PCA.data.Model = prcomp(test.PCA.data[,c(-19)], scale = FALSE)#exclude any non-numeric variable to run the PCA, namely Target
+train.PCA.data.Model$x #Quick view the Data after running a PCA with 5 components 
+test.PCA.data.Model$x #Quick view the Data after running a PCA with 5 components 
+summary(train.PCA.data.Model)
+summary(test.PCA.data.Model)
+#exclude any non-numeric variable to run the PCA, namely Target
+
+#Initial results shows that ~95 of the variance is explained at the 14th component.
+
+```
+
+PCA Step 2.2: Plot a Scree plot to visually see the appropriate number of components for the model.
+```{r}
+
+
+fviz_eig(train.PCA.data.Model, addlabels=TRUE, ylim=c(0,60), geom = c("bar", "line"), barfill = "pink", barcolor="grey",linecolor = "blue", ncp=18)+
+  labs(title = "Scree Plot - PCA - Train Data",
+       x = "Principal Components", y = "% of variances")#using factoextra with ggplot to draw a scree plot.
+
+fviz_eig(test.PCA.data.Model, addlabels=TRUE, ylim=c(0,60), geom = c("bar", "line"), barfill = "pink", barcolor="grey",linecolor = "blue", ncp=18)+
+  labs(title = "Scree Plot - PCA - Test Data",
+       x = "Principal Components", y = "% of variances")
+#At 9th components variance explained amounted to ~84%, very low increase beyond this component
+```
+
+PCA Step 2.3: Understand the relationship with components and variables
+```{r}
+train.PCA.data.var = get_pca_var(train.PCA.data.Model)
+library(corrplot) #library to plot correlation between variables 
+# Also, let see the relationship with components and variables
+corrplot(train.PCA.data.var$cos2, is.corr=FALSE)
+
+test.PCA.data.var = get_pca_var(test.PCA.data.Model)
+library(corrplot) #library to plot correlation between variables 
+# Also, let see the relationship with components and variables
+corrplot(test.PCA.data.var$cos2, is.corr=FALSE)
+
+#very weak relations beyond the 9th components
+```
+
+PCA Step 2.4: Create Components Dataset
+```{r}
+PCA.train.data = data.frame(train.PCA.data.Model$x)[,0:10]
+PCA.train.data = cbind(train.data[,c(1,2,4,5,23)],PCA.train.data)
+head(PCA.train.data)
+dim(PCA.train.data)
+
+PCA.test.data = data.frame(test.PCA.data.Model$x)[,0:10]
+PCA.test.data = cbind(test.data[,c(1,2,4,5,23)],PCA.test.data)
+head(PCA.test.data)
+dim(PCA.test.data)
+
+
+```
+
+
+
+-------------------------------------------------------------------------------------
+
+```{r}
+install.packages('nFactors')
+install.packages('cor')
+library(nFactors)
+library(psych)
+scaled.data = data.frame(scale(train.data[c(3,6:22)]))
+cor(scaled.data)
+EV= eigen(cor(scaled.data))
+print(EV,digits=5)
+Eigen.Vales = EV$values
+Factors = c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18)
+Scree = data.frame(Factors,Eigen.Vales)
+plot(Scree, main='Scree Plot', col='Blue',ylim=c(0,4))
+lines(Scree,col="Red")
+unrotate = principal(scaled.data,nfactors = 10,rotate = 'none')
+print(unrotate, digits = 4)
+unrotated.profile = plot(unrotate, row.names(unrotate$loadings))
+rotated = principal(scaled.data,nfactors =10,rotate = 'varimax')
+print(rotated, digits = 4)
+rotated.profile = plot(rotated, row.names(unrotate$loadings),cex=1.0)
+unrotate$
+rotated$scores
+rotated$x
+```
+------------------------------------------------------------------------------------------
+
+Modeling Step 3.1: Logistic Regression Model
+```{r}
+#Making sure Target Col is set as a factor
+str(PCA.train.data)
+PCA.train.data$Target = as.factor(PCA.train.data$Target)
+#Log Model 1 all data variables 
+Log.m1 = glm(PCA.train.data$Target~., family = "binomial", 
+                  data = PCA.train.data[,-5])
+summary(Log.m1)
+
+# Log model 2: Using stepwise algorithm for removing insignificant variables 
+Log.m2 = stepAIC(Log.m1, direction = "both", k=5) 
+summary(Log.m2) 
+
+#log model 3, excluding some factors collerated 
+Log.m3 = glm(PCA.train.data$Target~Gender+CustomerType+TypeTravel+PC1+PC2+PC3+PC4+PC5 + PC6+ PC7 + PC8 + PC9 , family = "binomial",data = PCA.train.data[,-5])
+summary(Log.m3)
+
+vif(Log.m3)# checking Multicollinearity using vif function, no signs of Multicollinearity. All scores are below 2
+
+# Running predictions
+# Predicting probabilities of responding for the PCA test data
+Log.predictions = predict(Log.m1, newdata = PCA.test.data[,-5], type = "response")
+summary(Log.predictions)
+
+
+# Let's use the probability cutoff of 50%.: "Benchmark cutoff"
+Log.predicted.response = as.factor(ifelse(Log.predictions >= 0.50, '1', '0'))
+# Creating confusion matrix for identifying the model evaluation.
+
+PCA.test.data$Target = factor(PCA.test.data$Target)
+Log.predicted.response = factor(Log.predicted.response)
+View(Log.predicted.response)
+View(PCA.test.data$Target)
+str(Log.predicted.response)
+str(PCA.test.data$Target)
+conf = caret::confusionMatrix(Log.predicted.response,PCA.test.data$Target)
+conf #The model performance was very poor with accuracy ~47% and precision of ~51%
+#precision 7615/(7615+7229)
+
+```
+
+Based on the results for the Log model we ran on PCA data, let try to run the model on regular training data  
+```{r}
+#Lets Run a log model on regular train data to see impact of model predictions
+Log.mtrain = glm(train.data$Target~., family = "binomial",data =train.data[,c(-7,-23)])#Ran the model excluding Target and highly correlated variables 
+summary(Log.mtrain)
+vif(Log.mtrain) #Test for MultiCollinearity
+
+# Predicting probabilities of responding for the regular test data
+Log.predictionstrain = predict(Log.mtrain, newdata = test.data[,c(-7,-23)], 
+                               type = "response")
+# Let's use the probability cutoff of 50%.: "Benchmark cutoff"
+Log.predicted.responsetrain = as.factor(ifelse(Log.predictionstrain >= 0.50, '1', '0'))
+
+test.data$Target=as.factor(test.data$Target)#confirm Target is a factor
+
+conf.2 = caret::confusionMatrix(Log.predicted.responsetrain,test.data$Target)
+conf.2 #accuracy improved to reach ~83% and precision ~85%
+12640/(2288+12640)
+
+```
+
+In Attempt to improve the performance of the two Log models above, lets aim to improve it by finding the optimal probability cutoff 
+```{r}
+# Attempt one on PCA Data 
+perform_fn = function(cutoff,Log.predictions) 
+{
+  predicted_response = as.factor(ifelse(Log.predictions >= cutoff, "1", "0"))
+  conf = caret::confusionMatrix(predicted_response,PCA.test.data$Target, positive = "1")
+  acc = conf$overall[1]
+  sens = conf$byClass[1]
+  spec = conf$byClass[2]
+  out = t(as.matrix(c(sens, spec, acc))) 
+  colnames(out) = c("sensitivity", "specificity", "accuracy")
+  return(out)
+}
+
+# Creating cutoff values from 0.01 to 0.99 for plotting and initializing a matrix of 1000 X 4.
+s = seq(.05,.93,length=100)
+OUT = matrix(0,100,3)
+
+Loop = for(i in 1:100){
+  OUT[i,] = perform_fn(s[i],Log.predictions)
+} 
+
+
+# Plotting cutoffs - LR 
+plot(s, OUT[,1],xlab="Cutoff",ylab="Value",cex.lab=1.5,cex.axis=1.5,ylim=c(0,1),type="l",lwd=2,axes=FALSE,col=2)
+axis(1,seq(0,1,length=5),seq(0,1,length=5),cex.lab=1.5)
+axis(2,seq(0,1,length=5),seq(0,1,length=5),cex.lab=1.5)
+lines(s,OUT[,2],col="darkgreen",lwd=2)
+lines(s,OUT[,3],col=4,lwd=2)
+box()
+legend(0,.50,col=c(2,"darkgreen",4,"darkred"),lwd=c(2,2,2,2),c("Sensitivity","Specificity","Accuracy"))
+
+perform_fn(0.55,Log.predictions)# optimal cutoff was at 55%, but no huge improvement on model performance
+
+# Cutoff where all metrics give same value
+cutoff = s[which(abs(OUT[,1]-OUT[,2])<0.01)]
+cutoff #0.5566667
+
+
+# Attempt Two on Regular Train Data 
+
+perform_fn_2 = function(cutoff,Log.predictionstrain) 
+{
+  predicted_response = as.factor(ifelse(Log.predictionstrain >= cutoff, "1", "0"))
+  conf = caret::confusionMatrix(predicted_response,test.data$Target, 
+                                positive = "1")
+  acc = conf$overall[1]
+  sens = conf$byClass[1]
+  spec = conf$byClass[2]
+  out = t(as.matrix(c(sens, spec, acc))) 
+  colnames(out) = c("sensitivity", "specificity", "accuracy")
+  return(out)
+}
+
+# Creating cutoff values from 0.01 to 0.99 for plotting and initializing a matrix of 1000 X 4.
+s2 = seq(.05,.93,length=100)
+OUT2 = matrix(0,100,3)
+
+for(i in 1:100){
+  OUT2[i,] = perform_fn_2(s2[i],Log.predictionstrain)
+} 
+
+
+# Plotting cutoffs - LR 
+plot(s2, OUT2[,1],xlab="Cutoff",ylab="Value",cex.lab=1.5,cex.axis=1.5,ylim=c(0,1),type="l",lwd=2,axes=FALSE,col=2)
+axis(1,seq(0,1,length=5),seq(0,1,length=5),cex.lab=1.5)
+axis(2,seq(0,1,length=5),seq(0,1,length=5),cex.lab=1.5)
+lines(s2,OUT2[,2],col="darkgreen",lwd=2)
+lines(s2,OUT2[,3],col=4,lwd=2)
+box()
+legend(0,.50,col=c(2,"darkgreen",4,"darkred"),lwd=c(2,2,2,2),c("Sensitivity","Specificity","Accuracy"))
+
+perform_fn_2(0,Log.predictionstrain)
+
+# Cutoff where all metrics give same value
+cutoff2 = s2[which(abs(OUT2[,1]-OUT2[,2])<0.01)]
+cutoff2 #optimal range 0.5300000 to  0.5388889
+
+```
+
+After we have got the cut-off let's plug into the models and run our final performance checks 
+Log Models performance checks: (1) confusion Matrix
+```{r}
+# Let's input the optimal cutoff value for final models
+Log.predicted.response.final = as.factor(ifelse(Log.predictions >= 0.5566667, '1', '0'))
+
+conf.final = caret::confusionMatrix(Log.predicted.response.final,PCA.test.data$Target)
+conf.final #accuracy ~45% and precision ~50%
+#precision 6769/(6769+6738)
+
+Log.predicted.responsetrain.final = as.factor(ifelse(Log.predictionstrain >= 0.5388889, 
+                                                     '1', '0'))
+
+conf.2.final = caret::confusionMatrix(Log.predicted.responsetrain.final,test.data$Target)
+conf.2.final #accuracy ~84% and precision ~86%
+#precision 12405/(2004+12405)
+
+
+#### Print Logistic Regression Metrics
+
+## Logistic Regression Model - Accuracy 
+l.acc = conf.final$overall[1]
+l.acc.2 = conf.2.final$overall[1]
+
+
+## Logistic Regression Model - Sensitivity(or Recall) 
+l.sens = conf.final$byClass[1]
+l.sens.2 = conf.2.final$byClass[1]
+## Logistic Regression Model - Specificity
+l.spec = conf.final$byClass[2]
+l.spec.2 = conf.2.final$byClass[2]
+
+#storing results 
+cat("Logistic.PCA: \n Accuracy=", l.acc,"; Sensitivity=", l.sens,"; Specificity=", l.spec)
+cat("  
+Logistic: \n Accuracy=", l.acc.2,"; Sensitivity=", l.sens.2,"; Specificity=",
+    l.spec.2)
+
+```
+
+Log Models performance checks: (2) ROC Curve 
+```{r}
+# ROC Curve: Logistic Regression
+predicted_response_lr = Log.predictions 
+
+
+model_score_test_lr = prediction(predicted_response_lr,test.PCA.data$Target)
+
+
+model_perf_test_lr = performance(model_score_test_lr, "tpr", "fpr")#plot ROC Curves
+plot(model_perf_test_lr,col = "red", lab = c(10,10,10))#very mediocre performance on PCA data, the curve has no peek.  
+
+model_auc_test_lr = performance(model_score_test_lr,'auc')#check the value of AUC
+lm.PCA.AUC= as.numeric(model_auc_test_lr@y.values)#creating variable to store AUC
+print(lm.PCA.AUC)#45%
+
+#compute Gini.coeff
+lm.PCA.Gini= ineq(predicted_response_lr,'Gini')
+print(lm.PCA.Gini)
+
+
+#let apply the ROC test to regular data 
+predicted_response_lr.2=Log.predictionstrain 
+model_score_test_lr.2 = prediction(predicted_response_lr.2,test.data$Target)
+
+
+model_perf_test_lr.2 = performance(model_score_test_lr.2, "tpr", "fpr")#plot ROC Curves
+plot(model_perf_test_lr.2,col = "red", lab = c(10,10,10)) #much better performance on normal data 
+
+model_auc_test_lr.2 = performance(model_score_test_lr.2,'auc')#check the value of AUC
+lm.Reg.AUC= as.numeric(model_auc_test_lr.2@y.values)#creating variable to store AUC
+print(lm.Reg.AUC)#45%
+
+#compute Gini.coeff
+lm.Reg.Gini= ineq(predicted_response_lr.2,'Gini')
+print(lm.Reg.Gini)
+
+```
+
+Log Models performance checks: (3) Ks Statistics
+```{r}
+
+#KS Statistics on PCA Data 
+ks_table = attr(model_perf_test_lr, "y.values")[[1]] - (attr(model_perf_test_lr, "x.values")[[1]])
+l_ks = max(ks_table)
+l_ks #KS Statistics on PCA Data amounts to 0.081
+l_ks_PCA=max(model_perf_test_lr@y.values[[1]]-model_perf_test_lr@x.values[[1]])
+print(l_ks_PCA)#Another way to calculate KS Statistics on PCA Data amounts to 0.081
+
+
+#KS Statistics on normal Data 
+ks_table.2 = attr(model_perf_test_lr.2, "y.values")[[1]] - (attr(model_perf_test_lr.2, "x.values")[[1]])
+l_ks.2 = max(ks_table.2)
+l_ks.2 #KS Statistics on PCA Data amounts to 0.67
+l_ks_Reg=max(model_perf_test_lr.2@y.values[[1]]-model_perf_test_lr.2@x.values[[1]])
+print(l_ks_Reg)#Another way to calculate KS Statistics on reg. Data amounts to 67%
+
+# A higher the KS Statistics is desired, which implies which is the better model, and it means separation between class-1(i.e. Satisfied) and class-2(i.e.Not)]
+
+```
+Log Models performance checks: (4) Concordance 
+```{r}
+#calculate concordance, disconcordance and tied ratios it helps in asessing the model's predictive power.
+
+#Run it on PCA Data
+`Concordance(actuals = test.PCA.data$Target, predictedScores = predicted_response_lr)
+`#Run it on Reg. Data 
+Concordance(actuals = test.data$Target, predictedScores = predicted_response_lr.2)
+
+```
+
+Modeling Step 3.2: Naive Bayes Model
+```{r}
+#Naive Bayes Model on PCA Data
+NB.M1 = naiveBayes(as.factor(Target) ~. , data =PCA.train.data)
+NB.M1
+pred.m1 = predict(NB.M1, PCA.test.data, type = "raw")[,2] 
+                # Interest in probabilities, type="raw" P(Satisfied=1)
+plot(test.PCA.data$Target,predict(NB.M1, PCA.test.data, type = "raw")[,2])
+pred.m2 = predict(NB.M1, PCA.test.data, type = "raw")[,1]
+
+pred.m1[6]
+pred.m2[6]
+summary(pred.m1)  # Where P(Satisfied=1)
+
+#Naive Bayes Model on Normal Data
+NB.M2 = naiveBayes(as.factor(Target) ~. , data =train.data)
+NB.M2
+pred.m1.2 = predict(NB.M2, test.data, type = "raw")[,2] 
+plot(test.data$Target,predict(NB.M2, test.data, type = "raw")[,2])
+                # Interest in probabilities, type="raw" P(Satisfied=1)
+pred.m2.2 = predict(NB.M2, test.data, type = "raw")[,1]
+
+pred.m1.2[6]
+pred.m2.2[6]
+
+summary(pred.m1.2)  # Where P(Satisfied=1)
+```
+Let's attempt to find the Optimal Probability Cutoff for Naive Bayes
+```{r}
+# Prediction for each cutoff for PCA Data
+perform_fn_3 = function(cutoff,pred.m1) 
+{
+predicted_response = as.factor(ifelse(pred.m1 >= cutoff, "1", "0"))
+conf = caret::confusionMatrix(predicted_response,as.factor(PCA.test.data$Target), 
+                                positive = "1")
+  acc = conf$overall[1]
+  sens = conf$byClass[1]
+  spec = conf$byClass[2]
+  out = t(as.matrix(c(sens, spec, acc))) 
+  colnames(out) = c("sensitivity", "specificity", "accuracy")
+  return(out)
+}
+
+s = seq(.05,.93,length=100)
+OUT = matrix(0,100,3)
+
+for(i in 1:100){
+  OUT[i,] = perform_fn_3(s[i],pred.m1)} 
+
+
+# plotting cutoffs  - Naive Bayes 
+plot(s, OUT[,1],xlab="Cutoff",ylab="Value",cex.lab=1.5,cex.axis=1.5,ylim=c(0,1),type="l",lwd=2,axes=FALSE,col=2)
+axis(1,seq(0,1,length=5),seq(0,1,length=5),cex.lab=1.5)
+axis(2,seq(0,1,length=5),seq(0,1,length=5),cex.lab=1.5)
+lines(s,OUT[,2],col="darkgreen",lwd=2)
+lines(s,OUT[,3],col=4,lwd=2)
+box()
+legend(0,.50,col=c(2,"darkgreen",4,"darkred"),lwd=c(2,2,2,2),c("Sensitivity","Specificity","Accuracy"))
+
+# Let see the cutoff where we find all the metric give same value - NB
+cutoff = s[which(abs(OUT[,1]-OUT[,2])<0.01)]
+cutoff #0.5833333
+```
+```{r}
+# Prediction for each cutoff for Regular Data
+perform_fn_4 = function(cutoff,pred.m1.2) 
+{
+predicted_response = as.factor(ifelse(pred.m1.2 >= cutoff, "1", "0"))
+conf = caret::confusionMatrix(predicted_response,as.factor(test.data$Target), 
+                                positive = "1")
+  acc = conf$overall[1]
+  sens = conf$byClass[1]
+  spec = conf$byClass[2]
+  out = t(as.matrix(c(sens, spec, acc))) 
+  colnames(out) = c("sensitivity", "specificity", "accuracy")
+  return(out)
+}
+
+s = seq(.05,.93,length=100)
+OUT = matrix(0,100,3)
+
+for(i in 1:100){
+  OUT[i,] = perform_fn_4(s[i],pred.m1.2)} 
+
+
+# plotting cutoffs  - Naive Bayes 
+plot(s, OUT[,1],xlab="Cutoff",ylab="Value",cex.lab=1.5,cex.axis=1.5,ylim=c(0,1),type="l",lwd=2,axes=FALSE,col=2)
+axis(1,seq(0,1,length=5),seq(0,1,length=5),cex.lab=1.5)
+axis(2,seq(0,1,length=5),seq(0,1,length=5),cex.lab=1.5)
+lines(s,OUT[,2],col="darkgreen",lwd=2)
+lines(s,OUT[,3],col=4,lwd=2)
+box()
+legend(0,.50,col=c(2,"darkgreen",4,"darkred"),lwd=c(2,2,2,2),c("Sensitivity","Specificity","Accuracy"))
+
+# Let see the cutoff where we find all the metric give same value - NB
+cutoff.2 = s[which(abs(OUT[,1]-OUT[,2])<0.01)]
+cutoff.2 #0.6277778 0.6366667 0.6455556 0.6544444 0.6633333 0.6722222
+```
+
+Let's use optimal cutoff in our NB models 
+```{r}
+#PCA Data 
+predicted_response = factor(ifelse(pred.m1 >= 0.5833333 , "1", "0"))
+conf_final = caret::confusionMatrix(predicted_response, PCA.test.data$Target, positive = "1")
+conf_final #accuracy ~52% and precision ~57%
+#precision 
+7835/(5900+7835)
+
+#Regular Data 
+predicted_response.2 = factor(ifelse(pred.m1.2 >= 0.6722222 , "1", "0"))
+conf_final.2 = caret::confusionMatrix(predicted_response.2, test.data$Target, positive = "1")
+conf_final.2 #accuracy ~81% and precision ~84%
+#precision
+11984/(2312+11984)
+
+```
+
+After we have got the cut-off let's plug into the models and run our final performance checks 
+NB Models performance checks: (1) confusion Matrix
+```{r}
+## Accuracy 
+nb_acc = conf_final$overall[1]
+nb_acc.2 = conf_final.2$overall[1]
+## Sensitivity(or Recall)
+nb_sens = conf_final$byClass[1]
+nb_sens.2 = conf_final.2$byClass[1]
+
+## Specificity
+nb_spec = conf_final$byClass[2]
+nb_spec.2 = conf_final.2$byClass[2]
+
+cat("Logistic.PCA: \n Accuracy=", l.acc,"; Sensitivity=", l.sens,"; Specificity=", l.spec)
+cat("  
+Logistic: \n Accuracy=", l.acc.2,"; Sensitivity=", l.sens.2,"; Specificity=",
+    l.spec.2)
+cat("\nNB.PCA: \n Accuracy=", nb_acc,"; Sensitivity=", nb_sens,"; Specificity=", nb_spec)
+cat("\nNB: \n Accuracy=", nb_acc.2,"; Sensitivity=", nb_sens.2,"; Specificity=", nb_spec.2)
+```
+
+NB Models performance checks: (2) ROC Curve 
+```{r}
+# ROC Curve: NB Model on PCA Data
+predicted_response_lr = pred.m1 
+actual_response_lr = PCA.test.data$Target
+model_score_test_lr = prediction(predicted_response_lr,actual_response_lr)
+
+model_perf_test_lr = performance(model_score_test_lr, "tpr", "fpr")#plot ROC Curves
+plot(model_perf_test_lr,col = "red", lab = c(10,10,10))#better performance compared to LM model on PCA
+
+model_auc_test_lr = performance(model_score_test_lr,'auc')#check the value of AUC
+NB.PCA.AUC= as.numeric(model_auc_test_lr@y.values)#creating variable to store AUC
+print(NB.PCA.AUC)#53%
+
+#compute Gini.coeff
+NB.PCA.Gini= ineq(predicted_response_lr,'Gini')
+print(NB.PCA.Gini)#42%
+
+# ROC Curve: NB Model on Regular Data
+predicted_response_lr.2 = pred.m1.2 
+actual_response_lr.2 = test.data$Target
+model_score_test_lr.2 = prediction(predicted_response_lr.2,actual_response_lr.2)
+
+
+model_perf_test_lr.2 = performance(model_score_test_lr.2, "tpr", "fpr")#plot ROC Curves
+plot(model_perf_test_lr.2,col = "red", lab = c(10,10,10))
+
+model_auc_test_lr.2 = performance(model_score_test_lr.2,'auc')#check the value of AUC
+NB.Reg.AUC= as.numeric(model_auc_test_lr.2@y.values)#creating variable to store AUC
+print(NB.Reg.AUC)#89%
+
+#compute Gini.coeff
+NB.Reg.Gini= ineq(predicted_response_lr.2,'Gini')
+print(NB.Reg.Gini)#43%
+```
+NB Models performance checks: (3) Ks Statistics
+```{r}
+#KS Statistics on PCA Data
+ks_table = attr(model_perf_test_lr, "y.values")[[1]] - (attr(model_perf_test_lr, "x.values")[[1]])
+nb_ks = max(ks_table)
+nb_ks#KS Statistics on PCA Data amounts to 58%
+l_ks_PCA=max(model_perf_test_lr@y.values[[1]]-model_perf_test_lr@x.values[[1]])
+print(l_ks_PCA)#Another way to calculate KS Statistics on PCA Data amounts to 58%
+
+#KS Statistics on Reg. Data 
+ks_table.2 = attr(model_perf_test_lr.2, "y.values")[[1]] - (attr(model_perf_test_lr.2, "x.values")[[1]])
+nb_ks.2 = max(ks_table.2)
+nb_ks.2#KS Statistics on Reg. Data amounts to 63%
+l_ks_Reg=max(model_perf_test_lr.2@y.values[[1]]-model_perf_test_lr.2@x.values[[1]])
+print(l_ks_Reg)#Another way to calculate KS Statistics on Reg Data amounts to 63%
+
+```
+NB Models performance checks: (4) Concordance 
+```{r}
+#calculate concordance, disconcordance and tied ratios it helps in assessing the model's predictive power.
+
+#Run it on PCA Data
+Concordance(actuals = PCA.test.data$Target, predictedScores = predicted_response_lr)
+#Run it on Reg. Data 
+Concordance(actuals = test.data$Target, predictedScores = predicted_response_lr.2)
+```
+
+Modeling Step 3.3: KNN using Euclidean Distance
+```{r}
+# KNN - 5 Nearest neighbors on PCA Data
+m1.knn = knn3(PCA.train.data$Target~.,PCA.train.data[,-5],k = 5)
+m1.knn
+
+pred_knn = predict(m1.knn, PCA.test.data[,-5], type = "prob")[,2] # Interest in Probability, type="raw" P(M=1)
+summary(pred_knn) # Where P(M=1) ## Skipping training "K" - but we can do CV to find the optimal value of k
+View(train.data)
+# KNN - 5 Nearest neighbors on Reg. Data
+m1.knn.2 = knn3(train.data$Target~.,train.data[,-23],k = 5)
+m1.knn.2
+
+pred_knn.2 = predict(m1.knn.2, test.data[,-23], type = "prob")[,2] # Interest in Probability, type="raw" P(M=1)
+summary(pred_knn.2) # Where P(M=1) ## Skipping training "K" - but we can do CV to find the optimal value of k
+```
+Using caret::train() to choose the best number for K
+```{r}
+#Use plots to see optimal number of clusters for PCA Data: 
+ctrl = trainControl(method="repeatedcv",repeats = 3)
+
+knnFit = caret::train(Target~., data = PCA.train.data, 
+                      method = "knn", trControl = ctrl, 
+                      preProcess= c("center","scale"),tuneLength = 20)
+knnFit
+plot(knnFit)
+
+i=1
+k.optm=1
+for (i in 1:28){
+  knn.mod = knn(train=PCA.train.data, test=PCA.test.data, cl=PCA.train.data$Target, k=i)
+  k.optm[i] = 100 * sum(PCA.train.data$Target == knn.mod)/NROW(PCA.train.data$Target)
+  k=i
+  cat(k,'=',k.optm[i],'') }
+
+plot(k.optm, type="b", xlab="K-Value",ylab="Accuracy level")#optimal number is 12 ks
+
+#Plotting yields Number of Neighbors Vs accuracy (based on repeated cross validation)
+
+#Use plots to see optimal number of clusters for PCA Data: 
+ctrl = trainControl(method="repeatedcv",repeats = 3)
+
+knnFit.2 = caret::train(Target~., data = train.data, 
+                      method = "knn", trControl = ctrl, 
+                      preProcess= c("center","scale"),tuneLength = 20)
+knnFit.2
+plot(knnFit.2)
+
+i=1
+k.optm=1
+for (i in 1:28){
+  knn.mod = knn(train= train.data, test= test.data, cl= train.data$Target, k=i)
+  k.optm[i] = 100 * sum(train.data$Target == knn.mod)/NROW(train.data$Target)
+  k=i
+  cat(k,'=',k.optm[i],'') }
+plot(k.optm, type="b", xlab="K- Value",ylab="Accuracy level")#optimal number is 12 ks
+
+#Plotting yields Number of Neighbors Vs accuracy (based on repeated cross validation)
+
+```
+
+Lets run the KNN using 12 ks 
+```{r}
+# KNN - 12 Nearest neighbors on PCA or 16
+m2.knn = knn3(PCA.train.data$Target~.,PCA.train.data[,-5],k = 12)
+m2.knn
+pred_knn = predict(m2.knn, PCA.test.data[,-5], type = "prob")[,2] 
+summary(pred_knn) 
+
+# KNN - 12 Nearest neighbors on Reg Data 
+m2.knn.2=knn3(train.data$Target~.,train.data[,-23],k = 12)
+m2.knn.2
+pred_knn.2 = predict(m2.knn.2,test.data[,-23], type = "prob")[,2] 
+summary(pred_knn.2) 
+```
+
+Lets attempt to find KNN Optimal Probability Cut-off
+```{r}
+# Prediction for each cutoff for PCA Data
+perform_fn_5 = function(cutoff,pred_knn) 
+{
+predicted_response = as.factor(ifelse(pred_knn >= cutoff, "1", "0"))
+conf = caret::confusionMatrix(predicted_response,as.factor(PCA.test.data$Target), 
+                                positive = "1")
+  acc = conf$overall[1]
+  sens = conf$byClass[1]
+  spec = conf$byClass[2]
+  out = t(as.matrix(c(sens, spec, acc))) 
+  colnames(out) = c("sensitivity", "specificity", "accuracy")
+  return(out)
+}
+
+s = seq(.05,.93,length=100)
+OUT = matrix(0,100,3)
+### Prediction for each cutoff
+
+for(i in 1:100){
+  OUT[i,] = perform_fn_5(s[i],pred_knn)
+} 
+#---------------------------------------------------------    
+# plotting cutoffs  - KNN
+plot(s, OUT[,1],xlab="Cutoff",ylab="Value",cex.lab=1.5,cex.axis=1.5,ylim=c(0,1),type="l",lwd=2,axes=FALSE,col=2)
+axis(1,seq(0,1,length=5),seq(0,1,length=5),cex.lab=1.5)
+axis(2,seq(0,1,length=5),seq(0,1,length=5),cex.lab=1.5)
+lines(s,OUT[,2],col="darkgreen",lwd=2)
+lines(s,OUT[,3],col=4,lwd=2)
+box()
+legend(0,.50,col=c(2,"darkgreen",4,"darkred"),lwd=c(2,2,2,2),c("Sensitivity","Specificity","Accuracy"))
+
+# Prediction for each cutoff for Regular Data
+perform_fn_6 = function(cutoff,pred_knn.2) 
+{
+predicted_response = as.factor(ifelse(pred_knn.2 >= cutoff, "1", "0"))
+conf = caret::confusionMatrix(predicted_response,as.factor(test.data$Target), 
+                                positive = "1")
+  acc = conf$overall[1]
+  sens = conf$byClass[1]
+  spec = conf$byClass[2]
+  out = t(as.matrix(c(sens, spec, acc))) 
+  colnames(out) = c("sensitivity", "specificity", "accuracy")
+  return(out)
+}
+
+s = seq(.05,.93,length=100)
+OUT = matrix(0,100,3)
+### Prediction for each cutoff
+for(i in 1:100){
+  OUT[i,] = perform_fn_6(s[i],pred_knn.2)
+} 
+#---------------------------------------------------------    
+# plotting cutoffs  - KNN
+plot(s, OUT[,1],xlab="Cutoff",ylab="Value",cex.lab=1.5,cex.axis=1.5,ylim=c(0,1),type="l",lwd=2,axes=FALSE,col=2)
+axis(1,seq(0,1,length=5),seq(0,1,length=5),cex.lab=1.5)
+axis(2,seq(0,1,length=5),seq(0,1,length=5),cex.lab=1.5)
+lines(s,OUT[,2],col="darkgreen",lwd=2)
+lines(s,OUT[,3],col=4,lwd=2)
+box()
+legend(0,.50,col=c(2,"darkgreen",4,"darkred"),lwd=c(2,2,2,2),c("Sensitivity","Specificity","Accuracy"))
+
+```
+
+Select the Optimal cutoff and use it in our models
+```{r}
+# Let see the cutoff where we find all the metric give same value - KNN on PCA Data 
+cutoff = s[which(abs(OUT[,1]-OUT[,2]) < 0.02)]
+cutoff #0.4233333 0.4322222 0.4411111 0.4500000 0.4588889 0.4677778 0.4766667 0.4855556 0.4944444
+
+# Let's choose a cutoff value of 12% for final model
+predicted_response = factor(ifelse(pred_knn >= 0.4944444, "1", "0"))
+
+conf_final = caret::confusionMatrix(predicted_response, PCA.test.data$Target, positive = "1")
+conf_final # accuracy 52% and precision is 57%
+#precision 
+7835/(5900+7835)
+
+# Let see the cutoff where we find all the metric give same value - KNN on PCA Data 
+cutoff.2 = s[which(abs(OUT[,1]-OUT[,2]) < 0.02)]
+cutoff.2 #0.5388889 0.5477778 0.5566667 0.5655556 0.5744444 0.5833333
+
+# Let's choose a cutoff value of 12% for final model
+predicted_response.2 = factor(ifelse(pred_knn.2 >= 0.5833333, "1", "0"))
+
+conf_final.2 = caret::confusionMatrix(predicted_response.2, test.data$Target, positive = "1")
+conf_final.2 # accuracy 68% and precision is 72%
+#precision ~72% 10183/(3931+10183) 
+```
+
+After we have got the cut-off let's plug into the models and run our final performance checks 
+KNN Models performance checks: (1) confusion Matrix
+```{r}
+## KNN - Accuracy 
+knn_acc <- conf_final$overall[1]
+knn_acc.2 <- conf_final.2$overall[1]
+## KNN - Sensitivity(or Recall)
+knn_sens <- conf_final$byClass[1]
+knn_sens.2 <- conf_final.2$byClass[1]
+
+## KNN - Specificity
+knn_sens <- conf_final$byClass[1]
+knn_sens.2 <- conf_final.2$byClass[1]
+
+cat("Logistic.PCA: \n Accuracy=", l.acc,"; Sensitivity=", l.sens,"; Specificity=", l.spec)
+cat("  
+Logistic: \n Accuracy=", l.acc.2,"; Sensitivity=", l.sens.2,"; Specificity=",
+    l.spec.2)
+cat("\nNB.PCA: \n Accuracy=", nb_acc,"; Sensitivity=", nb_sens,"; Specificity=", nb_spec)
+cat("\nNB: \n Accuracy=", nb_acc.2,"; Sensitivity=", nb_sens.2,"; Specificity=", nb_spec.2)
+cat("\KNN.PCA: \n Accuracy=", knn_acc,"; Sensitivity=", knn_sens,"; Specificity=", knn_spec)
+cat("\KNN: \n Accuracy=", knn_acc.2,"; Sensitivity=", knn_sens.2,"; Specificity=", knn_spec.2)
+```
+
+KNN Models performance checks: (2) ROC Curve
+```{r}
+#ROC Curve for KNN model on PCA Data
+predicted_response_lr = pred_knn
+actual_response_lr = PCA.test.data$Target
+model_score_test_lr = prediction(predicted_response_lr,actual_response_lr)
+
+
+model_perf_test_lr = performance(model_score_test_lr, "tpr", "fpr")#plot ROC Curves
+plot(model_perf_test_lr,col = "red", lab = c(10,10,10))#good performance on the ROC 
+
+model_auc_test_lr = performance(model_score_test_lr,'auc')#check the value of AUC
+knn.PCA.AUC= as.numeric(model_auc_test_lr@y.values)#creating variable to store AUC
+print(knn.PCA.AUC)#43%
+
+#compute Gini.coeff
+knn.PCA.Gini= ineq(predicted_response_lr,'Gini')
+print(knn.PCA.Gini)#0.41%
+
+#ROC Curve for KNN model on Regular Data
+predicted_response_lr.2 = pred_knn.2
+actual_response_lr.2 = test.data$Target
+model_score_test_lr.2 = prediction(predicted_response_lr.2,actual_response_lr.2)
+
+
+model_perf_test_lr.2 = performance(model_score_test_lr.2, "tpr", "fpr")#plot ROC Curves
+plot(model_perf_test_lr.2,col = "red", lab = c(10,10,10))#good performance on the ROC 
+
+model_auc_test_lr.2 = performance(model_score_test_lr.2,'auc')#check the value of AUC
+knn.Reg.AUC= as.numeric(model_auc_test_lr.2@y.values)#creating variable to store AUC
+print(knn.Reg.AUC)#75%
+
+#compute Gini.coeff
+knn.Reg.Gini= ineq(predicted_response_lr.2,'Gini')
+print(knn.Reg.Gini)#0.24%
+```
+
+Models performance checks: (3) Ks Statistics
+```{r}
+#KS Statistics on PCA Data
+ks_table = attr(model_perf_test_lr, "y.values")[[1]] - (attr(model_perf_test_lr, "x.values")[[1]])
+knn_ks = max(ks_table)
+knn_ks #80%
+
+#KS Statistics on Reg Data
+ks_table.2 = attr(model_perf_test_lr.2, "y.values")[[1]] - (attr(model_perf_test_lr.2, "x.values")[[1]])
+knn_ks.2 = max(ks_table.2)
+knn_ks.2 #36%
+```
+
+KNN Models performance checks: (4) Concordance 
+```{r}
+#calculate concordance, disconcordance and tied ratios it helps in assessing the model's predictive power.
+
+#Run it on PCA Data
+Concordance(actuals = PCA.test.data$Target, predictedScores = predicted_response_lr)
+#Run it on Reg. Data 
+Concordance(actuals = test.data$Target, predictedScores = predicted_response_lr.2)
+
+```
+
+Modeling Step 3.4: Ensemble learning is the training of multiple models using algorithms, which mainly aims to create a strong leaner from a weak one. This is done either through bagging which is parallel learning process or boosting which a sequntial learning process built on penalization for error. 
+
+
+Modeling Step 3.4.1: Bagging using Random Forest  “RF” 
+Random forest is an improved algorithm bagging which builds number of trees using a random subsets of data.
+
+```{r}
+#Build Random Forest on PCA Data 
+set.seed(69)#setting a seed for re-generation 
+
+train.PCA.data$Target = as.factor(PCA.train.data$Target)
+RndForest = randomForest(PCA.train.data$Target~.,
+                         data = PCA.train.data,ntree=501,mtry=3,
+                         nodesize=10,importance=T)
+print(RndForest)
+
+#Build Random Forest on regular Data 
+train.data$Target = as.factor(train.data$Target)
+RndForest.2 = randomForest(train.data$Target~.,
+                         data = train.data,ntree=501,mtry=3,
+                         nodesize=10,importance=T)
+print(RndForest.2)
+```
+
+RF Model tuning: Plot error rate, to understand when the gain on number of trees stops
+```{r}
+#PCA Data
+print(RndForest$err.rate)
+plot(RndForest) #Based on the plot we see that OOB plateau after ~50, so no point to use 501 trees in our forest
+#Reg Data
+
+print(RndForest.2$err.rate)
+plot(RndForest.2) #Based on the plot we see that OOB plateau after ~50 to 60, so no point to use 501 trees in our forest
+```
+
+
+RF Model tuning:Let's try to evaluate the important of the variables used on our model
+```{r}
+#PCA Data
+importance(RndForest) #The most important two variables are Income and Education for our predication 
+
+#Reg Data
+importance(RndForest.2) #The most important two variables are Income and Education for our predication
+
+```
+
+RF Model tuning: Run number of Scenarios for mtry or variables randomly selected to understand what is the impact on my OOB.
+```{r}
+set.seed(69)
+
+T.RndForest = tuneRF(PCA.train.data[,-5],PCA.train.data$Target,mtryStart = 6,stepFactor = 1.5,ntreeTry = 51,improve = 0.0001, nodesize = 10,trace = T,plot = T,doBest = T,importance=T) #6 Variables is the best, yielding the lowest OOB
+
+
+
+set.seed(69)
+T.RndForest.2 = tuneRF(train.data[,-23],train.data$Target,mtryStart = 13,stepFactor = 1.5,ntreeTry = 51,improve = 0.0001, nodesize = 10,trace = T,plot = T,doBest = T,importance=T) #13 Variables is the best, yielding the lowest OOB
+```
+
+Used the tuned model to predict variables. Testing my RF model predication Power
+```{r}
+#Run on PCA Data 
+RF_OutPut_Train = PCA.train.data
+RF_OutPut_Test = PCA.test.data
+RF_OutPut_Train$Predict.Class = predict(T.RndForest,RF_OutPut_Train,type = "class")
+RF_OutPut_Test$Predict.Class = predict(T.RndForest,RF_OutPut_Test,type = "class")
+RF_OutPut_Train$Predict.Score = predict(T.RndForest,RF_OutPut_Train,type = "prob")[,"1"] 
+RF_OutPut_Test$Predict.Score = predict(T.RndForest,RF_OutPut_Test,type = "prob")[,"1"] 
+#Prob. for satisfied passengers 
+View(RF_OutPut_Train)
+View(RF_OutPut_Test)
+
+#Run on Reg Data 
+RF_OutPut_Train.2 = train.data
+RF_OutPut_Test.2 = test.data
+RF_OutPut_Train.2$Predict.Class = predict(T.RndForest.2,RF_OutPut_Train.2,type = "class")
+RF_OutPut_Test.2$Predict.Class = predict(T.RndForest.2,RF_OutPut_Test.2,type = "class")
+RF_OutPut_Train.2$Predict.Score = predict(T.RndForest.2,RF_OutPut_Train.2,type = "prob")[,"1"] 
+RF_OutPut_Test.2$Predict.Score = predict(T.RndForest.2,RF_OutPut_Test.2,type = "prob")[,"1"] 
+#Prob. for satisfied passengers 
+View(RF_OutPut_Train.2)
+View(RF_OutPut_Test.2)
+```
+
+RF Models performance checks: (1) confusion Matrix
+```{r}
+RFconf = caret::confusionMatrix(RF_OutPut_Test$Target,RF_OutPut_Test$Predict.Class)
+RFconf #accuracy 54% |Recall 50%|Precision 55%
+#Precision
+8276/(6652+8276)
+RFconf.2 = caret::confusionMatrix(RF_OutPut_Test.2$Target,RF_OutPut_Test.2$Predict.Class)
+RFconf.2 #accuracy 95% |Recall 93%|Precision 94%
+#Precision
+14072/(856+14072)
+
+```
+RF Models performance checks: (2) ROC Curve
+```{r}
+#ROC Curve for RF model on PCA Data
+View(RF_OutPut_Test$Predict.Score)
+predicted_response_lr = RF_OutPut_Test$Predict.Score
+actual_response_lr = PCA.test.data$Target
+model_score_test_lr = prediction(predicted_response_lr,actual_response_lr)
+
+
+model_perf_test_lr = performance(model_score_test_lr, "tpr", "fpr")#plot ROC Curves
+plot(model_perf_test_lr,col = "red", lab = c(10,10,10))#good performance on the ROC 
+
+model_auc_test_lr = performance(model_score_test_lr,'auc')#check the value of AUC
+RF.PCA.AUC= as.numeric(model_auc_test_lr@y.values)#creating variable to store AUC
+print(RF.PCA.AUC)#55%
+
+#compute Gini.coeff
+RF.PCA.Gini= ineq(predicted_response_lr,'Gini')
+print(RF.PCA.Gini)#0.38%
+
+#ROC Curve for RF model on Regular Data
+predicted_response_lr.2 =RF_OutPut_Test.2$Predict.Score
+actual_response_lr.2 = test.data$Target
+model_score_test_lr.2 = prediction(predicted_response_lr.2,actual_response_lr.2)
+
+
+model_perf_test_lr.2 = performance(model_score_test_lr.2, "tpr", "fpr")#plot ROC Curves
+plot(model_perf_test_lr.2,col = "red", lab = c(10,10,10))#good performance on the ROC 
+
+model_auc_test_lr.2 = performance(model_score_test_lr.2,'auc')#check the value of AUC
+RF.Reg.AUC= as.numeric(model_auc_test_lr.2@y.values)#creating variable to store AUC
+print(RF.Reg.AUC)#99%
+
+#compute Gini.coeff
+RF.Reg.Gini= ineq(predicted_response_lr.2,'Gini')
+print(RF.Reg.Gini)#0.45%
+```
+
+RF Models performance checks: (3) Ks Statistics
+```{r}
+#KS Statistics on PCA Data
+ks_table = attr(model_perf_test_lr, "y.values")[[1]] - (attr(model_perf_test_lr, "x.values")[[1]])
+knn_ks = max(ks_table)
+knn_ks #89%
+
+#KS Statistics on Reg Data
+ks_table.2 = attr(model_perf_test_lr.2, "y.values")[[1]] - (attr(model_perf_test_lr.2, "x.values")[[1]])
+knn_ks.2 = max(ks_table.2)
+knn_ks.2 #89%
+```
+
+XGB Models performance checks: (4) Concordance 
+```{r}
+#calculate concordance, disconcordance and tied ratios it helps in assessing the model's predictive power.
+#Run it on PCA Data
+Concordance(actuals = PCA.test.data$Target, predictedScores = predicted_response_lr)
+#Run it on Reg. Data 
+Concordance(actuals = test.data$Target, predictedScores = predicted_response_lr.2)
+
+```
+
+Modeling Step 3.3: Boosting using Extreme Gradient Boosting “XGB” 
+Unlike bagging boosting is sequential learning through penalization. So, you run number of trees stumps and each time an error occurs we weight even more in the following tree, this is called learning rate. XGboost is very powerful method of boosting that is very fast, it have many tuning parameters and gives you the ability for early stopping.
+```{r}
+#Run XGB on PCA Data 
+train.PCA.data1= sparse.model.matrix(PCA.train.data$Target~., 
+                                     data = PCA.train.data[,-5])#dummy coding and transforming data to matrix
+head(train.PCA.data1)
+output_vector = PCA.train.data$Target == "1"
+test.PCA.data1= sparse.model.matrix(PCA.test.data$Target~., data = PCA.test.data[,-5])
+xgb.features.train = as.matrix(PCA.train.data[,-5]) #Transforming data into matrices
+xgb.Target.train = as.matrix(PCA.test.data[,-5]) #XGboost only works with matrices 
+xgb.features.test = as.matrix(PCA.test.data[,-5]) #same is done for test data
+xgb.test = PCA.test.data
+#Building the XGboost formula 
+xgbm = xgboost(data = train.PCA.data1, label = output_vector,eta = 0.001,
+              max_depth = 3,min_child_weight= 3, nrounds = 10000,nfold = 5, 
+              objective ='binary:logistic', verbose = 0,early_stopping_rounds = 10)
+out= predict(xgbm,test.PCA.data1)
+typeof(out)
+View(xgb.features.test)
+#xgb.features.test = xgb.features.test[,]#no need think about removing it
+View(xgb.features.test)
+xgb.features.test = as.data.frame(xgb.features.test)
+xgb.features.test =  cbind(xgb.features.test,out)
+View(xgb.features.test)
+xgb.features.test$pred = as.factor(ifelse(xgb.features.test$out>0.5,"1","0"))
+str(xgb.features.test)
+View(xgb.features.test)
+
+XBNconf = caret::confusionMatrix(xgb.features.test$pred,as.factor(PCA.test.data$Target))
+XBNconf
+# Overall accuracy of the model is ~39% | Recall 37% | precision 44%
+
+#precision 
+6070/(7750+6070)
+View(train.data)
+#Run XGB on Regular Data 
+train.data1= sparse.model.matrix(train.data$Target~., 
+                                     data = train.data[,-23])#dummy coding and transforming data to matrix
+head(train.data1)
+output_vector.2 = train.data$Target == "1"
+test.data1= sparse.model.matrix(test.data$Target~., data = test.data[,-23])
+xgb.features.train.2 = as.matrix(train.data[,1:22]) #Transforming data into matrices
+xgb.Target.train.2 = as.matrix(test.data[,23]) #XGboost only works with matrices 
+xgb.features.test.2 = as.matrix(test.data[,1:22]) #same is done for test data
+xgb.test.2 = test.data
+#Building the XGboost formula 
+xgbm.2 = xgboost(data = train.data1, label = output_vector,eta = 0.001,
+              max_depth = 3,min_child_weight= 3, nrounds = 10000,nfold = 5, 
+              objective ='binary:logistic', verbose = 0,early_stopping_rounds = 10)
+out.2= predict(xgbm.2,test.data1)
+typeof(out.2)
+View(out.2)
+#xgb.features.test.2 = xgb.features.test.2[,]#no need think about removing it
+xgb.features.test.2 = as.data.frame(xgb.features.test.2)
+xgb.features.test.2 =  cbind(xgb.features.test.2,out.2)
+xgb.features.test.2$pred = as.factor(ifelse(xgb.features.test.2$out>0.5,"1","0"))
+
+
+XBNconf.2 = caret::confusionMatrix(xgb.features.test.2$pred,as.factor(test.data$Target))
+XBNconf.2
+# Overall accuracy of the model is ~85% | Recall 87% | precision 89%
+
+#precision 
+12452/(1598+12452)
+```
+
+XGboost Model Tuning (1/2):
+Based on the XGboost results, we might be able to tune the model in attempt to get better results.
+So, I built a custom function that tries different input to model tuning parameter to get the best results.Mainly adjusting learning rate (lr), max depth (md) and number of rounds (nr).
+```{r}
+
+# Creating number of scenarios to test of the best outcome by tuning the three parameters discussed earlier
+# Run it on PCA Data first 
+tp_xgb= vector()
+lr = c(0.001,0.01,0.1,0.3,0.5,0.7,1) #best is 0.7
+md = c(1,3,5,7,9,15) #best is 9
+nr = c(2,50,100,1000,10000) #best is 1000 
+for (i in nr ) {
+xgbm = xgboost(data = train.PCA.data1, label = output_vector,eta = 0.7,
+              max_depth = 9 ,min_child_weight= 3, nrounds = 1000 ,nfold = 5, 
+              objective ='binary:logistic', verbose = 0,early_stopping_rounds = 10)
+out= predict(xgbm,test.PCA.data1)
+ tp_xgb = cbind(tp_xgb,sum(xgb.test$Target==1 & out>=0.5))}
+tp_xgb
+
+
+
+# Run it on Regular Data  
+tp_xgb= vector()
+lr = c(0.001,0.01,0.1,0.3,0.5,0.7,1) #best is 1
+md = c(1,3,5,7,9,15) #best is 15
+nr = c(2,50,100,1000,10000) #best is 50
+for (i in nr ) {
+xgbm = xgboost(data = train.data1, label = output_vector,eta = 1,
+              max_depth = 15 ,min_child_weight= 3, nrounds = 50 ,nfold = 5, 
+              objective ='binary:logistic', verbose = 0,early_stopping_rounds = 10)
+out= predict(xgbm,test.data1)
+ tp_xgb = cbind(tp_xgb,sum(xgb.test.2$Target==1 & out>=0.5))}
+tp_xgb
+```
+Lets used the optimal hyper parameter as an input to improve our XGB models 
+```{r}
+#Run XGB on PCA Data 
+#Improving the XGboost formula 
+xgbm = xgboost(data = train.PCA.data1, label = output_vector,eta = 0.7,
+              max_depth = 9,min_child_weight= 3, nrounds = 1000,nfold = 5, 
+              objective ='binary:logistic', verbose = 0,early_stopping_rounds = 10)
+out= predict(xgbm,test.PCA.data1)
+
+#xgb.features.test = xgb.features.test[,-19]#no need think about removing it
+xgb.features.test = as.data.frame(xgb.features.test)
+xgb.features.test =  cbind(xgb.features.test,out)
+xgb.features.test$pred = as.factor(ifelse(xgb.features.test$out>0.5,"1","0"))
+
+
+XBNconf = caret::confusionMatrix(xgb.features.test$pred,as.factor(PCA.test.data$Target))
+XBNconf
+# Overall accuracy of the model improved to ~39% | Recall 37% | precision 44%
+
+#precision 
+6070/(7750+6070)
+
+#Run XGB on Regular Data 
+#Improving the XGboost formula 
+xgbm.2 = xgboost(data = train.data1, label = output_vector,eta = 1,
+              max_depth = 15,min_child_weight= 3, nrounds = 50,nfold = 5, 
+              objective ='binary:logistic', verbose = 0,early_stopping_rounds = 10)
+out.2= predict(xgbm.2,test.data1)
+#xgb.features.test.2 = xgb.features.test.2[,-19]#no need think about removing it
+xgb.features.test.2 = as.data.frame(xgb.features.test.2)
+xgb.features.test.2 =  cbind(xgb.features.test.2,out.2)
+
+xgb.features.test.2$pred = as.factor(ifelse(xgb.features.test.2$out.2>0.5,"1","0"))
+
+
+XBNconf.2 = caret::confusionMatrix(xgb.features.test.2$pred,as.factor(test.data$Target))
+XBNconf.2
+# Overall accuracy of the model improved to ~85% | Recall 87% | precision 89%
+
+#precision 
+12452/(1598+12452)
+```
+
+XGboost Model Tuning (2/2):
+Lets attempt to find XGboost Optimal Probability Cut-off
+```{r}
+# Prediction for each cutoff for PCA Data
+perform_fn_7 = function(cutoff,out) 
+{
+predicted_response = as.factor(ifelse(out >= cutoff, "1", "0"))
+conf = caret::confusionMatrix(predicted_response,as.factor(PCA.test.data$Target), 
+                                positive = "1")
+  acc = conf$overall[1]
+  sens = conf$byClass[1]
+  spec = conf$byClass[2]
+  out = t(as.matrix(c(sens, spec, acc))) 
+  colnames(out) = c("sensitivity", "specificity", "accuracy")
+  return(out)
+}
+
+s = seq(.05,.93,length=100)
+OUT = matrix(0,100,3)
+### Prediction for each cutoff
+for(i in 1:100){
+  OUT[i,] = perform_fn_7(s[i],out)
+} 
+#---------------------------------------------------------    
+# plotting cutoffs  - XGB (looks like 50%)
+plot(s, OUT[,1],xlab="Cutoff",ylab="Value",cex.lab=1.5,cex.axis=1.5,ylim=c(0,1),type="l",lwd=2,axes=FALSE,col=2)
+axis(1,seq(0,1,length=5),seq(0,1,length=5),cex.lab=1.5)
+axis(2,seq(0,1,length=5),seq(0,1,length=5),cex.lab=1.5)
+lines(s,OUT[,2],col="darkgreen",lwd=2)
+lines(s,OUT[,3],col=4,lwd=2)
+box()
+legend(0,.50,col=c(2,"darkgreen",4,"darkred"),lwd=c(2,2,2,2),c("Sensitivity","Specificity","Accuracy"))
+
+# Prediction for each cutoff for Regular Data
+perform_fn_7 = function(cutoff,out.2) 
+{
+predicted_response = as.factor(ifelse(out.2 >= cutoff, "1", "0"))
+conf = caret::confusionMatrix(predicted_response,as.factor(test.data$Target), 
+                                positive = "1")
+  acc = conf$overall[1]
+  sens = conf$byClass[1]
+  spec = conf$byClass[2]
+  out = t(as.matrix(c(sens, spec, acc))) 
+  colnames(out) = c("sensitivity", "specificity", "accuracy")
+  return(out)
+}
+
+s = seq(.05,.93,length=100)
+OUT = matrix(0,100,3)
+### Prediction for each cutoff
+for(i in 1:100){
+  OUT[i,] = perform_fn_7(s[i],out.2)
+} 
+#---------------------------------------------------------    
+# plotting cutoffs  - XBG - Seems like 50% also. 
+plot(s, OUT[,1],xlab="Cutoff",ylab="Value",cex.lab=1.5,cex.axis=1.5,ylim=c(0,1),type="l",lwd=2,axes=FALSE,col=2)
+axis(1,seq(0,1,length=5),seq(0,1,length=5),cex.lab=1.5)
+axis(2,seq(0,1,length=5),seq(0,1,length=5),cex.lab=1.5)
+lines(s,OUT[,2],col="darkgreen",lwd=2)
+lines(s,OUT[,3],col=4,lwd=2)
+box()
+legend(0,.50,col=c(2,"darkgreen",4,"darkred"),lwd=c(2,2,2,2),c("Sensitivity","Specificity","Accuracy"))
+```
+
+Select the Optimal cutoff and use it in XGB models
+```{r}
+# Let see the cutoff where we find all the metric give same value - KNN on PCA Data 
+cutoff = s[which(abs(OUT[,1]-OUT[,2]) < 0.02)]
+cutoff #[1] 0.4233333 0.4322222 0.4411111 0.4500000 0.4588889 0.4677778 0.4766667 0.4855556 0.4944444 0.5033333 0.5122222 0.5211111 0.5300000 0.5388889 0.5477778 0.5566667
+
+# Let's choose a cutoff value of 12% for final model
+predicted_response = factor(ifelse(out >= 0.5, "1", "0"))
+
+conf_final = caret::confusionMatrix(predicted_response, as.factor(PCA.test.data$Target), positive = "1")
+conf_final # accuracy 94% and Recall 94% and  precision is 95%
+#precision 
+14090/(663+14090)
+
+# Let see the cutoff where we find all the metric give same value - KNN on PCA Data 
+cutoff.2 = s[which(abs(OUT[,1]-OUT[,2]) < 0.02)]
+cutoff.2 #0.4144444 0.4233333 0.4322222 0.4411111 0.4500000 0.4588889 0.4677778 0.4766667 0.4855556 0.4944444 0.5033333 0.5122222 0.5211111 0.5300000 0.5388889 0.5477778
+
+# Let's choose a cutoff value of 12% for final model
+predicted_response.2 = factor(ifelse(out.2 >= 0.5, "1", "0"))
+
+conf_final.2 = caret::confusionMatrix(predicted_response.2, test.data$Target, positive = "1")
+conf_final.2 # accuracy 95% and Recall 94% precision is 96%
+#precision 
+14090/(663+14090) 
+```
+
+After we have got the cut-off let's plug into the models and run our final performance checks 
+XGB Models performance checks: (1) confusion Matrix
+```{r}
+## XGB - Accuracy 
+XGB_acc <- conf_final$overall[1]
+XGB_acc.2 <- conf_final.2$overall[1]
+## XGB - Sensitivity(or Recall)
+XGB_sens <- conf_final$byClass[1]
+XGB_sens.2 <- conf_final.2$byClass[1]
+
+## XGB - Specificity
+XGB_sens <- conf_final$byClass[1]
+XGB_sens.2 <- conf_final.2$byClass[1]
+
+cat("Logistic.PCA: \n Accuracy=", l.acc,"; Sensitivity=", l.sens,"; Specificity=", l.spec)
+cat("  
+Logistic: \n Accuracy=", l.acc.2,"; Sensitivity=", l.sens.2,"; Specificity=",
+    l.spec.2)
+cat("\nNB.PCA: \n Accuracy=", nb_acc,"; Sensitivity=", nb_sens,"; Specificity=", nb_spec)
+cat("\nNB: \n Accuracy=", nb_acc.2,"; Sensitivity=", nb_sens.2,"; Specificity=", nb_spec.2)
+cat("\KNN.PCA: \n Accuracy=", knn_acc,"; Sensitivity=", knn_sens,"; Specificity=", knn_spec)
+cat("\KNN: \n Accuracy=", knn_acc.2,"; Sensitivity=", knn_sens.2,"; Specificity=", knn_spec.2)
+cat("\XGB.PCA: \n Accuracy=", XGB_acc,"; Sensitivity=", XGB_sens,"; Specificity=", XGB_spec)
+cat("\XGB: \n Accuracy=", XGB_acc.2,"; Sensitivity=", XGB_sens.2,"; Specificity=", XGB_spec.2)
+```
+
+XGB Models performance checks: (2) ROC Curve
+```{r}
+#ROC Curve for KNN model on PCA Data
+predicted_response_lr = out
+actual_response_lr = PCA.test.data$Target
+model_score_test_lr = prediction(predicted_response_lr,actual_response_lr)
+
+
+model_perf_test_lr = performance(model_score_test_lr, "tpr", "fpr")#plot ROC Curves
+plot(model_perf_test_lr,col = "red", lab = c(10,10,10))#good performance on the ROC 
+
+model_auc_test_lr = performance(model_score_test_lr,'auc')#check the value of AUC
+XGB.PCA.AUC= as.numeric(model_auc_test_lr@y.values)#creating variable to store AUC
+print(XGB.PCA.AUC)#99%
+
+#compute Gini.coeff
+XGB.PCA.Gini= ineq(predicted_response_lr,'Gini')
+print(XGB.PCA.Gini)#0.455%
+
+#ROC Curve for KNN model on Regular Data
+predicted_response_lr.2 = out.2
+actual_response_lr.2 = test.data$Target
+model_score_test_lr.2 = prediction(predicted_response_lr.2,actual_response_lr.2)
+
+
+model_perf_test_lr.2 = performance(model_score_test_lr.2, "tpr", "fpr")#plot ROC Curves
+plot(model_perf_test_lr.2,col = "red", lab = c(10,10,10))#good performance on the ROC 
+
+model_auc_test_lr.2 = performance(model_score_test_lr.2,'auc')#check the value of AUC
+XGB.Reg.AUC= as.numeric(model_auc_test_lr.2@y.values)#creating variable to store AUC
+print(XGB.Reg.AUC)#99%
+
+#compute Gini.coeff
+XGB.Reg.Gini= ineq(predicted_response_lr.2,'Gini')
+print(XGB.Reg.Gini)#0.45%
+```
+
+XGB Models performance checks: (3) Ks Statistics
+```{r}
+#KS Statistics on PCA Data
+ks_table = attr(model_perf_test_lr, "y.values")[[1]] - (attr(model_perf_test_lr, "x.values")[[1]])
+knn_ks = max(ks_table)
+knn_ks #89%
+
+#KS Statistics on Reg Data
+ks_table.2 = attr(model_perf_test_lr.2, "y.values")[[1]] - (attr(model_perf_test_lr.2, "x.values")[[1]])
+knn_ks.2 = max(ks_table.2)
+knn_ks.2 #89%
+```
+
+XGB Models performance checks: (4) Concordance 
+```{r}
+#calculate concordance, disconcordance and tied ratios it helps in assessing the model's predictive power.
+#Run it on PCA Data
+Concordance(actuals = PCA.test.data$Target, predictedScores = predicted_response_lr)
+#Run it on Reg. Data 
+Concordance(actuals = test.data$Target, predictedScores = predicted_response_lr.2)
+
+```
+```{r}
+setwd('D:/UT Autin/Capstone/Project Notes III')
+getwd()
+library(caret)
+library(randomForest)
+library(varImp)
+library(readxl) #library to improt excel files 
+library(party)
+master.data= read_xlsx(path = 'master_data_cleaned.xlsx')
+View(master.data)
+install.packages('varImp')
+mp = varImp(T.RndForest.2) #xgbm.2 T.RndForest.2
+mp
+mp.RF = caret::varImp(T.RndForest.2,conditional = TRUE)
+mp.RF
+
+?varImp
+plot(mp.RF)
+
+install.packages("klaR")
+library(klaR)
+
+typeof(master.data)
+master.data.df = as.data.frame(master.data)
+master.data.df$Target = as.factor(master.data.df$Target)
+train <- sample(nrow(master.data.df), round(0.7*nrow(master.data.df)))
+
+woeModel = woe(x= master.data.df, grouping = master.data.df$Target, weights = NULL, zeroadj = 0,
+               ids = NULL,appont = TRUE)
+
+View(master.data)
+
+data("GermanCredit")
+
+## training/validation split
+train <- sample(nrow(GermanCredit), round(0.6*nrow(GermanCredit)))
+
+woemodel.2 <- woe(credit_risk~., data = GermanCredit[train,], zeroadj=0.5, applyontrain = TRUE)
+woemodel.2
+View(GermanCredit[train,])
+typeof(GermanCredit$credit_risk)
+str(master.data$Target)
+str(GermanCredit$credit_risk)
+str(GermanCredit)
+str(master.data.df)
+
+
+install.packages("InformationValue")
+library(InformationValue)
+str(master.data$Target)
+View(master.data)
+master.data$Target = as.numeric_version(master.data$Target)
+str(master.data)
+master.data$Target= as.factor(master.data$Target)
+
+woeModel.3= WOE(X=master.data, Y=master.data$Target)
+woeModel.3
+
+options(scipen = 999, digits = 2)
+WOETable(X=master.data, Y=master.data$Target)
+```
+
+
+
+
+
+
+
+

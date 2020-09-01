@@ -1,0 +1,409 @@
+---
+title: "Falcon Airlines - Capstone Project - Notes II"
+author: "Mohanned Gomaa"
+date: "6/1/2020"
+output:
+  html_document:
+    df_print: paged
+---
+
+Introduction:
+This is the dilemma of a reputed US airline carrier ‘Falcon airlines’. They aim to determine the relative importance of each parameter with regards to their contribution to passenger satisfaction. 
+
+Setting aa working directory 
+```{r}
+setwd('D:/UT Autin/Capstone/Project Notes II')
+getwd()
+```
+Import load data sets 
+```{r}
+Flight_data= read.csv("Marketing Project-Flight data.csv",header = T,na.strings=c("","NA"))
+Survey_data= read.csv("Marketing Project-Survey data.csv",header = T,na.strings=c("","NA"))
+```
+
+Quick Glance over datasets
+```{r}
+colnames(Flight_data)
+colnames(Survey_data)
+head(Flight_data)
+head(Survey_data)
+```
+
+Understand data types we are working with
+```{r}
+str(Flight_data)
+str(Survey_data)
+```
+
+Summary overview of the data sets
+```{r}
+summary(Flight_data)
+summary(Survey_data)
+```
+
+Another detailed look using the describe function, which shows us the skew of data.
+```{r}
+library(psych)#Understanding Data distribution and dispersion 
+describe(Flight_data)
+describe(Survey_data)
+```
+
+Common Issue with data:
+A- We need to check if we have any missing data and decide on how to treat them. 
+```{r}
+library(rapportools)
+library(Amelia)
+print("--------------------NA Cells---------------------------")
+colSums(is.na(Flight_data))
+print("--------------------NA Cells---------------------------")
+colSums(is.na(Survey_data))
+print("--------------------Empty Cells---------------------------")
+colSums(is.empty(Flight_data))
+print("--------------------Empty Cells---------------------------")
+colSums(is.empty(Survey_data))
+
+missmap(Flight_data, main = "Missing values vs observed")
+missmap(Survey_data, main = "Missing values vs observed")
+```
+
+B- Check if the data is balanced or not?
+```{r}
+table(Survey_data$Satisfaction)
+49761/(90917) #My data is split nearly 50-50 between satisfied or not. 
+```
+
+The Data preprocessing is process of fixing data issues to ensure building a more robust models. Below a list of keys steps implement to fix Falcon Air Dataset.
+
+
+Data Preprocessing Step 1: Merge both sources of Flights and Survey data sets, to have a single inclusive source of data. This will use capture both flight info and combine it with satisfaction results to understand if they have any impact. We will create a master data set by Join Data sets using customer ID.
+```{r}
+library(tidyverse)#importing dplyr to use its rename function 
+
+colnames(Flight_data)#checking col names to check if the common col is spelled the same way
+colnames(Survey_data)
+
+
+Survey_data = Survey_data %>% rename(CustomerID = CustomerId) #Renaming cols to prepare for the join
+
+master_data = merge(Flight_data,Survey_data,by.y ='CustomerID') #Consolidating my sets of data into a master data set, using an inner join to improve the analysis and analysis. 
+
+head(master_data)
+```
+
+Missing Data check on master data set
+```{r}
+
+
+library(rapportools)
+library(Amelia)
+
+print("--------------------NA Cells---------------------------")
+colSums(is.na(master_data))
+print("-------------------Empty Cells--------------------------")
+colSums(is.empty(master_data))
+
+missmap(master_data, main = "Missing values vs observed")
+
+```
+
+
+Data Preprocessing Step 2:Variables Transformation mainly focuses on changing data types for example to work better in our model. We mainly here changed all categorical data into ordinal data, while the Target data changed from categorical to binary. 
+```{r}
+
+#created a reusable formula that helps me change all survey results into Ordinal data or rating between 0 for extremely poor to 5 for excellent. 
+
+replce.text = function(variable){
+  library(stringr)
+  variable = str_replace_all(variable,c("extremely poor"),"0")
+  variable = str_replace_all(variable,c("poor"),"1")
+  variable = str_replace_all(variable,c("need improvement"),"2")
+  variable = str_replace_all(variable,c("acceptable"),"3")
+  variable = str_replace_all(variable,c("good"),"4")
+  variable = str_replace_all(variable,c("excellent"),"5")
+  variable = str_replace_all(variable,c("very inconvinient"),"0")
+  variable = str_replace_all(variable,c("Inconvinient"),"1")
+  variable = str_replace_all(variable,c("manageable"),"3")
+  variable = str_replace_all(variable,c("Convinient"),"4")
+  variable = str_replace_all(variable,c("very convinient"),"5")
+  as.integer(variable)
+} 
+
+
+
+
+
+View(master_data) #data before change
+
+
+#Changing data into ordinal data 
+master_data$Seat_comfort = replce.text(master_data$Seat_comfort)
+master_data$Departure.Arrival.time_convenient=replce.text(master_data$Departure.Arrival.time_convenient)
+master_data$Food_drink = replce.text(master_data$Food_drink)
+master_data$Gate_location = replce.text(master_data$Gate_location)
+master_data$Inflightwifi_service = replce.text(master_data$Inflightwifi_service)
+master_data$Inflight_entertainment = replce.text(master_data$Inflight_entertainment)
+master_data$Online_support = replce.text(master_data$Online_support)
+master_data$Ease_of_Onlinebooking = replce.text(master_data$Ease_of_Onlinebooking)
+master_data$Onboard_service = replce.text(master_data$Onboard_service)
+master_data$Leg_room_service = replce.text(master_data$Leg_room_service)
+master_data$Baggage_handling = replce.text(master_data$Baggage_handling)
+master_data$Checkin_service = replce.text(master_data$Checkin_service)
+master_data$Cleanliness = replce.text(master_data$Cleanliness)
+master_data$Online_boarding = replce.text(master_data$Online_boarding)
+
+
+
+
+#Creating a new column that combine departure and arrival delays
+
+library(tidyverse) #load tidyverse to use mutate function.
+
+#first lets remove NAs from Arrival delays and replace it with Zeros'.
+master_data$ArrivalDelayin_Mins [is.na(master_data$ArrivalDelayin_Mins)] = 0 
+colSums(is.na(master_data))#checked no more NA, now we can proceed with summing both cols. 
+
+
+View(master_data)#data after change
+
+```
+
+
+
+Data Preprocessing Step 3: Add new variables labeled as "Target" to our data set.Target is a transformation of the overall satisfaction variable from categorical to binary, to be understood by the algorithms used. Now, we need to create a Target variable, based on the overall satisfaction column. So, We changed all overall satisfaction cells that equals to satisfied to 1, anything else is 0. Removing unwanted variables such as customer ID, Overall satisfaction and Combine departure and arrival delays in one column labeled delay. 
+```{r}
+#Creating a new Target column and transforming factor into binary binary, 0 and 1.
+
+library(tidyverse) #load tidyverse to use mutate function.
+
+master_data = mutate(master_data, Target = master_data$Satisfaction) #create a copy of satisfaction column.
+master_data$Target= as.factor(str_replace_all(master_data$Target,"satisfied","1")) #replace car text to 1 #Relates to Data Preprocessing step2: Variables Transformation
+
+master_data$Target= as.factor(str_replace_all(master_data$Target,
+                                              "neutral or dis1","0")) #replace other text to 0 #Relates to Data Preprocessing step2: Variables Transformation
+
+table(master_data$Satisfaction)#checking my changes went through 
+table(master_data$Target)#checking my changes went through 
+
+#remove unneeded cols Customer ID, Arrival delay and Departure Delay 
+
+master_data_step3 = master_data[c(2:9,11:25)]
+
+View(master_data_step3)#confirming changes took place.
+
+
+colSums(is.na(master_data_step3))#missing data check
+
+```
+
+Data Preprocessing Step 4: We attempt to treat missing values identified using through imputation method is defined a replacing NAs with a value from my data set (ex: Mean, Median). In this project will relay on the power of DMwR package in treating missing values using KNN Imputation. KNN Imputation Fill in NA values with the values of the nearest neighbours. 
+```{r}
+library(DMwR)#load the needed package for imputation
+library(rapportools) #checks empty cells 
+library(Amelia) #plots missing values
+library(mice)
+
+md.pattern(master_data_step3)#plots missing values on a matrix 
+
+master_data_step4 = mice(master_data_step3,m=5,method = "pmm",seed = 123)
+master_data_step4.1 = complete(master_data_step4,2)
+md.pattern(master_data_step4.1)#plots missing values on a matrix 
+colSums(is.na(master_data_step4.1))#after inspection we still have two categorical variables that are considered binary and still have NAs, we need to dummy code them and use Logistic Regression to predict the outcome.
+
+#created a reusable formula that help me in dummy coding of CustomerType and TypeTravel cols.
+replce.text.2 = function(variable){
+  library(stringr)
+  variable = str_replace_all(variable,c("Loyal Customer"),"1")
+  variable = str_replace_all(variable,c("disloyal Customer"),"0")
+  variable = str_replace_all(variable,c("Business travel"),"1")
+  variable = str_replace_all(variable,c("Personal Travel"),"0")
+  as.integer(variable)
+} 
+
+master_data_step4.2 = master_data_step4.1
+
+master_data_step4.2$CustomerType = replce.text.2(master_data_step4.2$CustomerType)
+master_data_step4.2$TypeTravel = replce.text.2(master_data_step4.2$TypeTravel)
+
+str(master_data_step4.2$TypeTravel)
+
+View(master_data_step4.2)
+
+master_data_step4.3 = mice(master_data_step4.2,m=5,method = "logreg",seed = 123)
+
+master_data_step4.4 = complete(master_data_step4.3,2)
+
+
+#check for NAs' and empty cells after imputation 
+colSums(is.na(master_data_step4.4))
+missmap(master_data_step4.4, main = "Missing values vs observed")
+md.pattern(master_data_step4.4)#plots missing values on a matrix 
+```
+Lets reverse the change dummy coding for CustomerType and TypeTravel for its orginal form 
+```{r}
+#creating a backup data set...
+master_data_step4.5= master_data_step4.4
+str(master_data_step4.5$TypeTravel)
+str(master_data_step4.5$CustomerType)
+#changing data type as string
+master_data_step4.5$TypeTravel = as.character(master_data_step4.5$TypeTravel)
+master_data_step4.5$CustomerType = as.factor(master_data_step4.5$CustomerType)
+
+
+#Changing data into ordinal data 
+master_data_step4.5$TypeTravel=as.factor(str_replace_all(master_data_step4.5$TypeTravel,"1","Business Travel"))
+master_data_step4.5$TypeTravel=as.factor(str_replace_all(master_data_step4.5$TypeTravel,"0","Personal Travel"))
+
+master_data_step4.5$CustomerType=as.factor(str_replace_all(master_data_step4.5$CustomerType,"1","Loyal Customer"))
+master_data_step4.5$CustomerType=as.factor(str_replace_all(master_data_step4.5$CustomerType,"0","Disloyal Customer"))
+
+View(master_data_step4.5)
+colSums(is.na(master_data_step4.5))
+
+```
+
+Data Preprocessing Step 5: We will attempt to treat outliers using the Box Plot Method, by setting a Floor and a Cap using Percentile Distribution. This is considered as a general practice, if there isn't much of domain knowledge. Flooring is set at 1% Percentile and Capping is set at a 99% Percentile. Treating outliers is very important as it might impact our the accuracy of our model. 
+```{r}
+#creating a backup data set...
+master_data_step4.51= master_data_step4.5
+
+# Using percentile distribution
+col_vars = colnames(master_data_step4.51)
+View(col_vars)
+
+boxplot(master_data_step4.51$Flight_Distance,col = 'Blue',main= 'Flight Distance')#checking for outliers
+boxplot(master_data_step4.51$DepartureDelayin_Mins,col = 'Blue',main= 'Departure Delay')#checking for outliers
+boxplot(master_data_step4.51$ArrivalDelayin_Mins,col = 'Blue',main= 'Arrival Delay')#checking for outliers
+
+boxplot(data=master_data_step4.51[6:8], col=(c("orange","Blue")),main="Delays", xlab="Departure and Arrival Delays")
+
+
+
+# Define a reusable function for outlier treatment 
+outlier_treatment_fun = function(data,var_name)
+                        {
+                        capping = as.vector(quantile(data[,var_name],0.99))
+                        flooring = as.vector(quantile(data[,var_name],0.01))
+  
+                        data[,var_name][which(data[,var_name]<flooring)]= flooring
+                        data[,var_name][which(data[,var_name]>capping)]= capping
+                        #print('done',var_name)
+                        return(data)
+                        }
+
+# Performing outlier treatment to all the variables
+for(i in col_vars[c(6,7,8)])
+  {
+  master_data_step4.51 = outlier_treatment_fun(master_data_step4.51,i)
+  }
+
+# This a code that can be re-used after updating the column names in new_vars
+
+summary(master_data_step4.51[c(6,7,8)]) # Review Flooring and Capping
+
+
+library(readxl)
+master_data_cleaned = read_xlsx('master_data_cleaned.xlsx')
+
+missmap(master_data_cleaned,main = "After Removing Missing Values")
+
+#chart2 = ggplot(master_data_cleaned,aes(DepartureDelayin_Mins))+geom_boxplot(outlier.color = 'Red')
+#chart2
+
+#ggloop(master_data_cleaned, y = c(6:8), x=as.factor(master_data_cleaned$Target))) %L+% geom_boxplot(alpha = 0.3)
+```
+
+
+Data Preprocessing Step 6: In this step I will attempt to split my data into test and train sets, based on a 70% to 30% split. Our split will maintian the 50%-50% ratio between Satsified and Others for our Target variable. We will use CaTools' sample.split function to carry out this step. 
+```{r}
+#creating a my master data set after being cleaned...
+
+master_data_cleaned = master_data_step4.51 
+
+
+typeof(master_data_cleaned)
+table(master_data_cleaned$Target) 
+49761/(49761+41156) #True is around 55%
+
+library(caTools) #very useful for its sampling function
+set.seed(69)#set seed help to produce the same data sets cuts, every time we run the code.
+split = sample.split(master_data_cleaned$Target,SplitRatio = 0.7) #split ratio 70%-30% 
+
+Train.data = subset(master_data_cleaned,split==T) #train data split is at 70%
+Test.data = subset(master_data_cleaned,split==F) #test data split is at 30%
+table(Train.data$Target) #maintained same ratio of minority class of 8.2%
+table(Test.data$Target) #maintained same ratio of minority class of 8.7%
+head(Train.data,10)
+head(Test.data,10)
+
+#saving new cleaned data sets 
+
+library(openxlsx)
+write.xlsx(master_data_cleaned, file="master_data_cleaned.xlsx", asTable = FALSE)#Save a copy of my cleaned master data 
+write.xlsx(Train.data, file="Train.data.xlsx", asTable = FALSE)#Save a copy of my cleaned train data 
+write.xlsx(Test.data, file="Test.data.xlsx", asTable = FALSE)#Save a copy of my cleaned test data 
+```
+
+Exploratory Data Analysis Step 1: Relationship among variables presented by a Correlation plot and a matrix important variables
+```{r}
+summary(master_data_cleaned)
+library(corrplot)#load corrplot for creating a corrplot and a matrix
+corrplot(cor( master_data_cleaned[,c(-1:-2,-4:-5,-23)]),method = 'square', title = 'Correlation matrix')#excluded all categorical variables 
+Corr = cor(master_data_cleaned[,c(-1:-2,-4:-5,-23)], method ="pearson")
+write.xlsx(Corr, file="Corr.xlsx", asTable = FALSE)#extract correlation matrix stats.
+```
+Exploratory Data Analysis Step 2: Bivariate Analysis Using GGally
+```{r}
+library(GGally)#load need library
+colnames(master_data_cleaned)
+col_vars_2 <- colnames(master_data_cleaned)
+View(col_vars_2)
+var_list_name = c("smoothness_mean","compactness_mean","concavity_mean","concave.points_mean","symmetry_mean",'diagnosis')
+
+
+hist_plot_fun = function(data,col_vars_2){
+  ggpairs(data[,col_vars_2], aes(color=as.factor(Target), alpha=0.75), lower=list(continuous="smooth"))+ theme_bw()+
+  labs(title="Overall Satisfiction")+
+  theme(plot.title=element_text(face='bold',color='black',hjust=0.5,size=12))
+}
+
+hist_plot_fun(master_data_cleaned,col_vars_2[c(1,23)])
+hist_plot_fun(master_data_cleaned,col_vars_2[c(2,23)])
+hist_plot_fun(master_data_cleaned,col_vars_2[c(3,23)])
+hist_plot_fun(master_data_cleaned,col_vars_2[c(4,23)])
+hist_plot_fun(master_data_cleaned,col_vars_2[c(5,23)])
+hist_plot_fun(master_data_cleaned,col_vars_2[c(6,23)])
+hist_plot_fun(master_data_cleaned,col_vars_2[c(7,23)])
+hist_plot_fun(master_data_cleaned,col_vars_2[c(8,23)])
+hist_plot_fun(master_data_cleaned,col_vars_2[c(9,23)])
+hist_plot_fun(master_data_cleaned,col_vars_2[c(10,23)])
+hist_plot_fun(master_data_cleaned,col_vars_2[c(11,23)])
+hist_plot_fun(master_data_cleaned,col_vars_2[c(12,23)])
+hist_plot_fun(master_data_cleaned,col_vars_2[c(13,23)])
+hist_plot_fun(master_data_cleaned,col_vars_2[c(14,23)])
+hist_plot_fun(master_data_cleaned,col_vars_2[c(15,23)])
+hist_plot_fun(master_data_cleaned,col_vars_2[c(16,23)])
+hist_plot_fun(master_data_cleaned,col_vars_2[c(17,23)])
+hist_plot_fun(master_data_cleaned,col_vars_2[c(18,23)])
+hist_plot_fun(master_data_cleaned,col_vars_2[c(19,23)])
+hist_plot_fun(master_data_cleaned,col_vars_2[c(20,23)])
+hist_plot_fun(master_data_cleaned,col_vars_2[c(21,23)])
+hist_plot_fun(master_data_cleaned,col_vars_2[c(22,23)])
+hist_plot_fun(master_data_cleaned,col_vars_2[c(11,13,14,17,23)])#Onboard services and target DB
+hist_plot_fun(master_data_cleaned,col_vars_2[c(19,12,20,23)])#Before & After services and target DB
+hist_plot_fun(master_data_cleaned,col_vars_2[c(9,18,21,23)])#Delays and target DB
+hist_plot_fun(master_data_cleaned,col_vars_2[c(7:8,23)])#Delays and target DB
+hist_plot_fun(master_data_cleaned,col_vars_2[c(15,16,22,23)])#online services and target DB
+hist_plot_fun(master_data_cleaned,col_vars_2[19:23])
+```
+
+##### Bivariate Analysis Using ggloop
+```{r}
+# List all numeric variables
+is.num <- sapply(master_data_cleaned, is.numeric)
+master_data_cleaned_num <- master_data_cleaned[, is.num]
+names(master_data_cleaned_num)
+
+# Density Plot for numerical variables
+ggloop(master_data_cleaned_num, aes_loop(x = c(3,6,7,8))) %L+% geom_density(aes(fill = as.factor(master_data_cleaned$Target), alpha = 0.3))
+```
+

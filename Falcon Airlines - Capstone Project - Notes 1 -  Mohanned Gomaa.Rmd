@@ -1,0 +1,257 @@
+---
+title: "Falcon Airlines - Capstone Project - Notes 1"
+author: "Mohanned Gomaa"
+date: "5/10/2020"
+output: pdf_document
+---
+
+Introduction:
+This is the dilemma of a reputed US airline carrier ‘Falcon airlines’. They aim to determine the relative importance of each parameter with regards to their contribution to passenger satisfaction. 
+
+Setting aa working directory 
+```{r}
+setwd('D:/UT Autin/Capstone/Project Notes I')
+getwd()
+```
+Import load data sets 
+```{r}
+Flight_data= read.csv("Marketing Project-Flight data.csv",header = T)
+Survey_data= read.csv("Marketing Project-Survey data.csv",header = T)
+```
+
+Quick Glance over datasets
+```{r}
+colnames(Flight_data)
+colnames(Survey_data)
+head(Flight_data)
+head(Survey_data)
+```
+
+Understand data types we are working with
+```{r}
+str(Flight_data)
+str(Survey_data)
+```
+
+Summary overview of the data sets
+```{r}
+summary(Flight_data)
+summary(Survey_data)
+class()
+```
+
+Another detailed look using the describe function, which shows us the skew of data.
+```{r}
+library(psych)#Understanding Data distribution and dispersion 
+extract1 = describe(Flight_data)
+extract2 = describe(Survey_data)
+library(openxlsx)
+write.xlsx(extract1, file="Flight_data_desc.xlsx", asTable = FALSE)#extract descriptive stats.
+write.xlsx(extract2, file="Survey_data_desc.xlsx", asTable = FALSE)#extract descriptive stats.
+```
+
+After looking at the results from my descriptive stats, we could not interpret the survey data. So, we are planning to transform categorical ordinal data into their into original form of data. 
+```{r}
+replce.text = function(variable){
+  library(stringr)
+  variable = str_replace_all(variable,c("extremely poor"),"0")
+  variable = str_replace_all(variable,c("poor"),"1")
+  variable = str_replace_all(variable,c("need improvement"),"2")
+  variable = str_replace_all(variable,c("acceptable"),"3")
+  variable = str_replace_all(variable,c("good"),"4")
+  variable = str_replace_all(variable,c("excellent"),"5")
+  variable = str_replace_all(variable,c("very inconvinient"),"0")
+  variable = str_replace_all(variable,c("Inconvinient"),"1")
+  variable = str_replace_all(variable,c("Convinient"),"3")
+  variable = str_replace_all(variable,c("very convinient"),"3")
+  as.integer(variable)
+}
+
+
+check = Survey_data
+
+View(check)
+
+check$Seat_comfort = replce.text(check$Seat_comfort)
+check$Departure.Arrival.time_convenient=replce.text(check$Departure.Arrival.time_convenient)
+check$Food_drink = replce.text(check$Food_drink)
+check$Gate_location = replce.text(check$Gate_location)
+check$Inflightwifi_service = replce.text(check$Inflightwifi_service)
+check$Inflight_entertainment = replce.text(check$Inflight_entertainment)
+check$Online_support = replce.text(check$Online_support)
+check$Ease_of_Onlinebooking = replce.text(check$Ease_of_Onlinebooking)
+check$Onboard_service = replce.text(check$Onboard_service)
+check$Leg_room_service = replce.text(check$Leg_room_service)
+check$Baggage_handling = replce.text(check$Baggage_handling)
+check$Checkin_service = replce.text(check$Checkin_service)
+check$Cleanliness = replce.text(check$Cleanliness)
+check$Online_boarding = replce.text(check$Online_boarding)
+
+
+View(check)
+str(check)
+
+```
+
+A re-run for descriptive stats for survey data after transforming data types.
+```{r}
+extract3 = describe(check)
+write.xlsx(extract3, file="Survey_data_desc2.xlsx", asTable = FALSE)#extract descriptive stats.
+```
+
+Common Issue with data:
+A- We need to check if we have any missing data and decide on how to treat them. 
+```{r}
+colSums(is.na(Flight_data))
+colSums(is.na(Survey_data))
+library(rapportools)
+colSums(is.empty(Flight_data))
+colSums(is.empty(Survey_data))
+library(Amelia)
+missmap(Flight_data, main = "Missing values vs observed")
+```
+
+B- Check if the data is balanced or not?
+```{r}
+table(check$Satisfaction)
+49761/(90917) #My data is split nearly 50-50 between satisfied or not. 
+```
+
+Now I need to visualize my data using ggplot. I attempt try to see the relation between using variables through Uni-variate and Bi-variate analysis...
+
+```{r}
+
+library(ggplot2)
+
+Age_hist = ggplot(master_data)+aes(Age)+geom_histogram(binwidth =3, color ="Orange", alpha = 0.5)+ggtitle(label = 'Passengers Age profile')+ labs(x='Age', y='Passengers')
+Age_hist 
+
+flightDist_hist = ggplot(master_data)+aes(master_data$Flight_Distance)+geom_histogram(binwidth =100, color ="Orange", alpha = 0.5)+ggtitle(label = 'Flights Distance profile')+ labs(x='Distance', y='Flights')
+flightDist_hist 
+
+DepDelay_hist = ggplot(master_data)+aes(master_data$DepartureDelayin_Mins)+geom_histogram(binwidth =20, color ="Orange", alpha = 0.5)+ggtitle(label = 'Departure Dealy Freq')+ labs(x='Delay in Minutes', y='Freq')
+
+DepDelay_hist
+
+ArrDelay_hist = ggplot(master_data)+aes(master_data$ArrivalDelayin_Mins)+geom_histogram(binwidth =20, color ="Orange", alpha = 0.5)+ggtitle(label = 'Arrival Dealy Freq')+ labs(x='Delay in Minutes', y='Freq')
+
+ArrDelay_hist
+
+SeatComf_hist = ggplot(check)+aes(check$Seat_comfort)+geom_histogram(binwidth =1, color ="Orange", alpha = 0.5)+ggtitle(label = 'Seat Comfort')+ labs(x='Rating', y='Passengers')
+SeatComf_hist
+
+Dep_Arr_time_hist = ggplot(check)+aes(check$Departure.Arrival.time_convenient)+geom_histogram(binwidth =1, color ="Orange", alpha = 0.5)+ggtitle(label = 'Departure and Arrival Times')+ labs(x='Rating', y='Passengers')
+Dep_Arr_time_hist
+
+fB_hist = ggplot(check)+aes(check$Food_drink)+geom_histogram(binwidth =1, color ="Orange", alpha = 0.5)+ggtitle(label = 'Food & Beverage Ratings')+ labs(x='Rating', y='Passengers')
+fB_hist
+
+GL_hist = ggplot(check)+aes(check$Gate_location)+geom_histogram(binwidth =1, color ="Orange", alpha = 0.5)+ggtitle(label = 'Gate Location Ratings')+ labs(x='Rating', y='Passengers')
+GL_hist
+
+wifi_hist = ggplot(check)+aes(check$Inflightwifi_service)+geom_histogram(binwidth =1, color ="Orange", alpha = 0.5)+ggtitle(label = 'On-board Wifi Ratings')+ labs(x='Rating', y='Passengers')
+
+wifi_hist
+
+Ent_hist = ggplot(check)+aes(check$Inflight_entertainment)+geom_histogram(binwidth =1, color ="Orange", alpha = 0.5)+ggtitle(label = 'On-board Entertainment Ratings')+ labs(x='Rating', y='Passengers')
+
+
+Ent_hist
+
+OS_hist = ggplot(check)+aes(check$Online_support)+geom_histogram(binwidth =1, color ="Orange", alpha = 0.5)+ggtitle(label = 'Online Support Ratings')+ labs(x='Rating', y='Passengers')
+
+OS_hist
+
+OB_hist = ggplot(check)+aes(check$Ease_of_Onlinebooking)+geom_histogram(binwidth =1, color ="Orange", alpha = 0.5)+ggtitle(label = 'Online Booking Ratings')+ labs(x='Rating', y='Passengers')
+
+OB_hist
+
+Ser_hist = ggplot(check)+aes(check$Onboard_service)+geom_histogram(binwidth =1, color ="Orange", alpha = 0.5)+ggtitle(label = 'Onboard Service Ratings')+ labs(x='Rating', y='Passengers')
+
+
+Ser_hist
+
+Leg_hist = ggplot(check)+aes(check$Leg_room_service)+geom_histogram(binwidth =1, color ="Orange", alpha = 0.5)+ggtitle(label = 'Leg Room Ratings')+ labs(x='Rating', y='Passengers')
+
+
+Leg_hist
+
+bag_hist = ggplot(check)+aes(check$Baggage_handling)+geom_histogram(binwidth =1, color ="Orange", alpha = 0.5)+ggtitle(label = 'Baggage Handling')+ labs(x='Rating', y='Passengers')
+
+
+bag_hist
+
+
+CS_hist = ggplot(check)+aes(check$Checkin_service)+geom_histogram(binwidth =1, color ="Orange", alpha = 0.5)+ggtitle(label = 'Check-in Service')+ labs(x='Rating', y='Passengers')
+
+
+CS_hist
+
+
+Clean_hist = ggplot(check)+aes(check$Cleanliness)+geom_histogram(binwidth =1, color ="Orange", alpha = 0.5)+ggtitle(label = 'Cleanliness')+ labs(x='Rating', y='Passengers')
+
+
+Clean_hist
+
+OBB_hist = ggplot(check)+aes(check$Online_boarding)+geom_histogram(binwidth =1, color ="Orange", alpha = 0.5)+ggtitle(label = 'Online Boarding')+ labs(x='Rating', y='Passengers')
+
+
+OBB_hist
+
+sat_bar = ggplot(check)+aes(check$Satisfaction)+geom_bar( color ="Orange", alpha = 0.5)+ggtitle(label = 'Passengers Overall Satisfaction')+ labs(x='Rating', y='Passengers')
+
+
+sat_bar
+
+sat_sex_bar = ggplot(master_data)+aes(master_data$Satisfaction)+geom_bar( color ="Orange", alpha = 0.5)+facet_wrap(master_data$Gender~.)+ggtitle(label = 'Passengers Overall Satisfaction by Gender')+ labs(x='Rating', y='Passengers')
+
+
+sat_sex_bar
+
+sat_Tr_bar = ggplot(master_data)+aes(master_data$Satisfaction)+geom_bar( color ="Orange", alpha = 0.5)+facet_wrap(master_data$TypeTravel~.)+ggtitle(label = 'Passengers Overall Satisfaction by Travel Type')+ labs(x='Rating', y='Passengers')
+
+sat_Tr_bar
+
+
+sat_class_bar = ggplot(master_data)+aes(master_data$Satisfaction)+geom_bar( color ="Orange", alpha = 0.5)+facet_wrap(master_data$~.)+ggtitle(label = 'Passengers Overall Satisfaction by Class')+ labs(x='Rating', y='Passengers')
+
+sat_class_bar
+
+
+hist(Car.data$Age[Car.data$Transport == 'Car'], col = 'Grey')
+
+```
+
+```{r}
+library(openxlsx)
+library(corrplot)
+corrplot(cor( master_data_2[,c(-1:-3,-5,-6,-10)]),method = 'square', title = 'Correlation matrix')
+Corr = cor(master_data_2[,c(-1:-3,-5,-6,-10)], method ="pearson")
+write.xlsx(Corr, file="Corr.xlsx", asTable = FALSE)#extract descriptive stats.
+??write.xlsx
+```
+View(master_data_2)
+
+```
+
+Create a master data set by Join Data sets using customer ID.
+```{r}
+library(tidyverse)#importing dplyr to use its rename function 
+
+colnames(Flight_data)
+colnames(Survey_data)
+
+
+Survey_data = Survey_data %>% rename(CustomerID = CustomerId) #Renaming cols to prepare for the join
+check = check %>% rename(CustomerID = CustomerId) #Renaming cols to prepare for the join
+
+head(Flight_data)
+
+head(Survey_data)
+
+master_data = merge(Flight_data,Survey_data,by.y ='CustomerID') #Consolidating my sets of data into a master data set, using an inner join to improve the analysis and analysis. 
+
+master_data_2 = merge(Flight_data,check,by.y ='CustomerID')
+?merge
+head(master_data)
+```
